@@ -1,0 +1,487 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Brick Breaker Game</title>
+  <style>
+    body {
+      margin: 0;
+      padding: 0;
+      background: #000;
+      font-family: 'Comic Sans MS', cursive, sans-serif;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      height: 100vh;
+      overflow: hidden;
+      color: #fff;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      background-color: #000;
+    }
+    canvas {
+      background: rgba(0, 0, 0, 0.4);
+      border: 1px solid black;
+      border-radius: 15px;
+      box-shadow: 0 0 100px white;
+    }
+    .home-screen, .instruction-screen, .game-over-screen {
+      position: fixed;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      text-align: center;
+      color: black;
+      padding: 40px 60px;
+      border-radius: 20px;
+      box-shadow: 0 0 100px black;
+      width: 90%;
+      max-width: 800px;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+    }
+    .home-screen h1 { font-size: 6vw; margin-bottom: 40px; }
+    .instruction-screen h1, .game-over-screen h1 { font-size: 5vw; margin-bottom: 40px; }
+    .home-screen button,
+    .instruction-screen button,
+    .game-over-screen button {
+      font-size: 3vw;
+      padding: 12px 28px;
+      margin-top: 20px;
+      background-color: #000;
+      border: none;
+      border-radius: 10px;
+      color: #fff;
+      cursor: pointer;
+      box-shadow: 0 5px 15px rgba(0, 0, 0, 0.25);
+      transition: background-color 0.3s ease, transform 0.2s ease;
+    }
+    .home-screen button:hover,
+    .instruction-screen button:hover,
+    .game-over-screen button:hover {
+      background-color: #333;
+      transform: scale(1.05);
+    }
+    .instruction-screen p {
+      font-size: 2vw;
+      margin: 10px 0;
+      line-height: 1.5;
+      max-width: 600px;
+    }
+    .neon-background {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: linear-gradient(-45deg, #ff66b3, #66ffcc, #cc66ff, #66ff80);
+      background-size: 400% 400%;
+      animation: neonBackground 5s ease infinite;
+      z-index: -1;
+    }
+    @keyframes neonBackground {
+      0% { background-position: 0% 50%; }
+      50% { background-position: 100% 50%; }
+      100% { background-position: 0% 50%; }
+    }
+  </style>
+</head>
+<body>
+
+<div class="neon-background"></div>
+<canvas id="gameCanvas"></canvas>
+
+<!-- Screens -->
+<div id="homeScreen" class="home-screen">
+  <h1>Brick Breaker</h1>
+  <button onclick="showInstructionScreen()">START</button>
+</div>
+<div id="instructionScreen" class="instruction-screen" style="display: none;">
+  <h1>How to Play</h1>
+  <p>Use the LEFT and RIGHT arrow keys to move the paddle.</p>
+  <p>Press DOWN arrow key to Pause</p>
+  <p>Press ENTER to start the game</p>
+</div>
+<div id="gameOverScreen" class="game-over-screen" style="display: none;">
+  <h1>Game Over</h1>
+  <button onclick="goToHome()">HOME</button>
+</div>
+<div id="rewardedScreen" class="game-over-screen" style="display: none;">
+  <h1>Watch Ad to Continue?</h1>
+  <h2>You can get 1 extra life!</h2>
+  <h2 id="countdownTimer">5</h2>
+  <button onclick="acceptReward()">Yes</button>
+</div>
+<div id="gameCompleteScreen" class="game-over-screen" style="display: none;">
+  <h1>Congratulations!</h1>
+  <h2>You won the game!</h2>
+  <button onclick="goToHome()">HOME</button>
+</div>
+
+<!-- Audio -->
+<audio id="gameMusic" loop>
+  <source src="sound.mp3" type="audio/mp3">
+</audio>
+
+<script>
+const canvas = document.getElementById("gameCanvas");
+const ctx = canvas.getContext("2d");
+
+// Dynamic canvas size adjustment
+function resizeCanvas() {
+  canvas.width = window.innerWidth * 0.9;
+  canvas.height = window.innerHeight * 0.7;
+}
+
+resizeCanvas();
+window.addEventListener("resize", resizeCanvas);
+
+let ballRadius = 10;
+let x, y, dx, dy;
+let paddleHeight = 10;
+let paddleWidth = 150;
+let paddleX;
+let rightPressed = false;
+let leftPressed = false;
+let brickRowCount = 5;
+let brickColumnCount = 8;
+let brickWidth = (canvas.width - 80) / brickColumnCount;
+let brickHeight = 25;
+let brickPadding = 10;
+let brickOffsetTop = 50;
+let bricks = [];
+let score;
+let lives;
+let paused = false;
+let trail = [];
+const maxTrailLength = 15;
+let rewardUsed = false;
+let countdownInterval;
+let animationFrameId;
+
+const heartImg = new Image();
+heartImg.src = 'heart.png';
+
+let totalBrickWidth = (brickWidth * brickColumnCount) + (brickPadding * (brickColumnCount - 1));
+let brickOffsetLeft = (canvas.width - totalBrickWidth) / 2;
+
+const gameMusic = document.getElementById("gameMusic");
+
+document.addEventListener("keydown", keyDownHandler);
+document.addEventListener("keyup", keyUpHandler);
+
+function keyDownHandler(e) {
+  const isGameplayScreen = canvas.style.display === "block" &&
+                           document.getElementById("rewardedScreen").style.display === "none";
+  const homeVisible = document.getElementById("homeScreen").style.display === "flex";
+  const instructionVisible = document.getElementById("instructionScreen").style.display === "flex";
+  const gameOverVisible = document.getElementById("gameOverScreen").style.display === "flex";
+  const gameCompleteVisible = document.getElementById("gameCompleteScreen").style.display === "flex";
+  const rewardedVisible = document.getElementById("rewardedScreen").style.display === "flex";
+
+  if (e.key === "Enter" || e.keyCode === 13) {
+    if (homeVisible) showInstructionScreen();
+    else if (instructionVisible) startGame();
+    else if (gameOverVisible || gameCompleteVisible) goToHome();
+    else if (rewardedVisible) acceptReward();
+  }
+
+  if (isGameplayScreen && (e.key === "1" || e.keyCode === 49)) {
+    score = brickRowCount * brickColumnCount;
+    showGameCompleteScreen();
+    return;
+  }
+
+  if (isGameplayScreen) {
+    if (e.key === "Right" || e.key === "ArrowRight" || e.keyCode === 39) rightPressed = true;
+    else if (e.key === "Left" || e.key === "ArrowLeft" || e.keyCode === 37) leftPressed = true;
+    else if (e.key === "ArrowDown" || e.keyCode === 40) paused = !paused;
+  }
+
+  e.preventDefault();
+}
+
+
+function keyUpHandler(e) {
+  if (canvas.style.display === "block") {
+    if (e.key === "Right" || e.key === "ArrowRight") rightPressed = false;
+    else if (e.key === "Left" || e.key === "ArrowLeft") leftPressed = false;
+  }
+
+  e.preventDefault();
+}
+
+function drawBall() {
+  trail.unshift({ x, y });
+  if (trail.length > maxTrailLength) trail.pop();
+  for (let i = 0; i < trail.length; i++) {
+    const point = trail[i];
+    const opacity = 1 - i / maxTrailLength;
+    ctx.beginPath();
+    ctx.arc(point.x, point.y, ballRadius - 2, 0, Math.PI * 2);
+    ctx.fillStyle = `rgba(255, 255, 255, ${opacity})`;
+    ctx.shadowColor = "white";
+    ctx.shadowBlur = 10 * opacity;
+    ctx.fill();
+    ctx.closePath();
+  }
+  ctx.beginPath();
+  ctx.arc(x, y, ballRadius, 0, Math.PI * 2);
+  ctx.fillStyle = "white";
+  ctx.shadowColor = "white";
+  ctx.shadowBlur = 20;
+  ctx.fill();
+  ctx.closePath();
+  ctx.shadowBlur = 0;
+}
+function roundRect(ctx, x, y, width, height, radius) {
+  ctx.beginPath();
+  ctx.moveTo(x + radius, y);
+  ctx.lineTo(x + width - radius, y);
+  ctx.quadraticCurveTo(x + width, y, x + width, y + radius);
+  ctx.lineTo(x + width, y + height - radius);
+  ctx.quadraticCurveTo(x + width, y + height, x + width - radius, y + height);
+  ctx.lineTo(x + radius, y + height);
+  ctx.quadraticCurveTo(x, y + height, x, y + height - radius);
+  ctx.lineTo(x, y + radius);
+  ctx.quadraticCurveTo(x, y, x + radius, y);
+  ctx.closePath();
+}
+
+function drawPaddle() {
+  ctx.beginPath();
+  ctx.fillStyle = "white";
+  ctx.shadowColor = "white";
+  ctx.shadowBlur = 20;
+  roundRect(ctx, paddleX, canvas.height - paddleHeight, paddleWidth, paddleHeight, 10);
+  ctx.fill();
+  ctx.closePath();
+  ctx.shadowBlur = 0;
+}
+
+function drawBricks() {
+  const rowColors = ["#e74c3c", "#e67e22", "#f1c40f", "#2ecc71", "#3498db"];
+  for (let c = 0; c < brickColumnCount; c++) {
+    for (let r = 0; r < brickRowCount; r++) {
+      if (bricks[c][r].status === 1) {
+        let brickX = c * (brickWidth + brickPadding) + brickOffsetLeft;
+        let brickY = r * (brickHeight + brickPadding) + brickOffsetTop;
+        bricks[c][r].x = brickX;
+        bricks[c][r].y = brickY;
+        ctx.beginPath();
+        ctx.fillStyle = rowColors[r];
+        roundRect(ctx, brickX, brickY, brickWidth, brickHeight, 6);
+        ctx.fill();
+        ctx.closePath();
+      }
+    }
+  }
+}
+
+function drawScore() {
+  ctx.font = "24px Comic Sans MS";
+  ctx.fillStyle = "white";
+  ctx.fillText("Score: " + score, canvas.width / 2 - ctx.measureText("Score: " + score).width / 2, 35);
+}
+
+function drawLives() {
+  const heartSize = 30;
+  for (let i = 0; i < lives; i++) {
+    ctx.drawImage(heartImg, 10 + i * (heartSize + 10), 10, heartSize, heartSize);
+  }
+}
+
+function drawPausedText() {
+  ctx.font = "48px Comic Sans MS";
+  ctx.fillStyle = "white";
+  ctx.fillText("PAUSED", canvas.width / 2 - ctx.measureText("PAUSED").width / 2, canvas.height / 2);
+  ctx.font = "24px Comic Sans MS";
+  ctx.fillText("Press Down arrow key to Resume", canvas.width / 2 - ctx.measureText("Press Down arrow key to Resume").width / 2, canvas.height / 2 + 40);
+}
+
+function collisionDetection() {
+  for (let c = 0; c < brickColumnCount; c++) {
+    for (let r = 0; r < brickRowCount; r++) {
+      let b = bricks[c][r];
+      if (b.status === 1) {
+        if (x + ballRadius > b.x && x - ballRadius < b.x + brickWidth &&
+            y + ballRadius > b.y && y - ballRadius < b.y + brickHeight) {
+          dy = -dy;
+          b.status = 0;
+          score++;
+          if (score === brickRowCount * brickColumnCount) {
+            showGameCompleteScreen();
+            return;
+          }
+        }
+      }
+    }
+  }
+}
+
+function draw() {
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  if (paused) {
+    drawPausedText();
+    animationFrameId = requestAnimationFrame(draw);
+    return;
+  }
+  drawBricks();
+  drawBall();
+  drawPaddle();
+  drawScore();
+  drawLives();
+  collisionDetection();
+  x += dx;
+  y += dy;
+
+  if (x + dx > canvas.width - ballRadius || x + dx < ballRadius) dx = -dx;
+  if (y + dy < ballRadius) dy = -dy;
+  else if (y + dy > canvas.height - ballRadius) {
+    if (x > paddleX && x < paddleX + paddleWidth) dy = -dy;
+    else {
+      lives--;
+      if (lives === 0) {
+        showRewardedScreen();
+        return;
+      } else {
+        x = canvas.width / 2;
+        y = canvas.height - 30;
+        dx = 4;
+        dy = -4;
+        paddleX = (canvas.width - paddleWidth) / 2;
+      }
+    }
+  }
+
+  if (rightPressed && paddleX < canvas.width - paddleWidth) paddleX += 7;
+  else if (leftPressed && paddleX > 0) paddleX -= 7;
+
+  animationFrameId = requestAnimationFrame(draw);
+}
+
+function startGame() {
+  if (animationFrameId) cancelAnimationFrame(animationFrameId);
+
+  paused = false;
+  x = canvas.width / 2;
+  y = canvas.height - 30;
+  dx = 4;
+  dy = -4;
+  paddleX = (canvas.width - paddleWidth) / 2;
+  lives = 3;
+  score = 0;
+  trail = [];
+  rewardUsed = false;
+
+  bricks = Array.from({ length: brickColumnCount }, () =>
+    Array.from({ length: brickRowCount }, () => ({ x: 0, y: 0, status: 1 }))
+  );
+
+  document.getElementById("instructionScreen").style.display = "none";
+  canvas.style.display = "block";
+  playGameMusic();
+  draw();
+}
+
+function showHomeScreen() {
+  document.getElementById("homeScreen").style.display = "flex";
+  document.getElementById("instructionScreen").style.display = "none";
+  document.getElementById("gameOverScreen").style.display = "none";
+  document.getElementById("gameCompleteScreen").style.display = "none";
+  document.getElementById("rewardedScreen").style.display = "none";
+  canvas.style.display = "none";
+  stopGameMusic();
+  if (animationFrameId) cancelAnimationFrame(animationFrameId);
+}
+
+function showInstructionScreen() {
+  document.getElementById("homeScreen").style.display = "none";
+  document.getElementById("instructionScreen").style.display = "flex";
+  document.getElementById("gameOverScreen").style.display = "none";
+  canvas.style.display = "none";
+}
+
+function showGameOver() {
+  document.getElementById("gameOverScreen").style.display = "flex";
+  canvas.style.display = "none";
+  stopGameMusic();
+  if (animationFrameId) cancelAnimationFrame(animationFrameId);
+}
+
+function showRewardedScreen() {
+  if (rewardUsed) {
+    showGameOver();
+    return;
+  }
+  rewardUsed = true;
+  paused = true;
+  document.getElementById("rewardedScreen").style.display = "flex";
+  canvas.style.display = "none";
+
+  let countdown = 5;
+  document.getElementById("countdownTimer").textContent = countdown;
+
+  countdownInterval = setInterval(() => {
+    countdown--;
+    document.getElementById("countdownTimer").textContent = countdown;
+    if (countdown === 0) {
+      clearInterval(countdownInterval);
+      declineReward();
+    }
+  }, 1000);
+}
+
+function acceptReward() {
+  clearInterval(countdownInterval);
+  if (animationFrameId) cancelAnimationFrame(animationFrameId);
+
+  lives = 1;
+  x = canvas.width / 2;
+  y = canvas.height - 30;
+  dx = 4;
+  dy = -4;
+  paddleX = (canvas.width - paddleWidth) / 2;
+  trail = [];
+
+  document.getElementById("rewardedScreen").style.display = "none";
+  canvas.style.display = "block";
+  paused = false;
+  draw();
+}
+
+function declineReward() {
+  document.getElementById("rewardedScreen").style.display = "none";
+  showGameOver();
+}
+
+function showGameCompleteScreen() {
+  document.getElementById("gameCompleteScreen").style.display = "flex";
+  canvas.style.display = "none";
+  stopGameMusic();
+  if (animationFrameId) cancelAnimationFrame(animationFrameId);
+}
+
+function goToHome() {
+  stopGameMusic();
+  showHomeScreen();
+}
+
+function playGameMusic() {
+  gameMusic.play();
+}
+
+function stopGameMusic() {
+  gameMusic.pause();
+  gameMusic.currentTime = 0;
+}
+
+showHomeScreen();
+</script>
+
+</body>
+</html>
